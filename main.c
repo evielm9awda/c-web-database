@@ -24,6 +24,8 @@ void generate_html(char* html, size_t size);
 void insert_record(int id, const char* name, int age);
 void update_record(int id, const char* name, int age);
 void delete_record(int id);
+void save_database(const char* filename);
+void load_database(const char* filename);
 
 int main() {
     int server_fd, new_socket;
@@ -78,6 +80,12 @@ void handle_request(int client_socket, char* method, char* path, char* body) {
         char html[BUFFER_SIZE];
         generate_html(html, sizeof(html));
         send_response(client_socket, html, "text/html");
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/save") == 0) {
+        save_database("database.txt");
+        send_response(client_socket, "Database saved", "text/plain");
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/load") == 0) {
+        load_database("database.txt");
+        send_response(client_socket, "Database loaded", "text/plain");
     } else {
         send_response(client_socket, "404 Not Found", "text/plain");
     }
@@ -143,4 +151,36 @@ void generate_html(char* html, size_t size) {
         "</script>"
         "</body>"
         "</html>");
+}
+
+void save_database(const char* filename) {
+    FILE* file = fopen(filename, "w");
+    if (!file) {
+        perror("Failed to save database");
+        return;
+    }
+
+    for (int i = 0; i < record_count; i++) {
+        fprintf(file, "%d,%s,%d\n", database[i].id, database[i].name, database[i].age);
+    }
+
+    fclose(file);
+}
+
+void load_database(const char* filename) {
+    FILE* file = fopen(filename, "r");
+    if (!file) {
+        perror("Failed to load database");
+        return;
+    }
+
+    record_count = 0;
+    while (fscanf(file, "%d,%49[^,],%d\n", &database[record_count].id, database[record_count].name, &database[record_count].age) == 3) {
+        record_count++;
+        if (record_count >= MAX_RECORDS) {
+            break;
+        }
+    }
+
+    fclose(file);
 }
