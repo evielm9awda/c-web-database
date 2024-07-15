@@ -7,7 +7,7 @@
 #include <time.h>
 
 #define PORT 8080
-#define BUFFER_SIZE 16384
+#define BUFFER_SIZE 8192
 #define MAX_RECORDS 100
 
 typedef struct {
@@ -54,6 +54,11 @@ int main() {
 
     printf("Server running on http://localhost:%d\n", PORT);
 
+    // Sample data
+    insert_record(1, "Alice Johnson", 30);
+    insert_record(2, "Bob Smith", 25);
+    insert_record(3, "Charlie Brown", 35);
+
     while (1) {
         if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
             perror("Accept failed");
@@ -81,18 +86,6 @@ void handle_request(int client_socket, char* method, char* path, char* body) {
         char html[BUFFER_SIZE];
         generate_html(html, sizeof(html));
         send_response(client_socket, html, "text/html");
-    } else if (strcmp(method, "GET") == 0 && strcmp(path, "/api/records") == 0) {
-        char json[BUFFER_SIZE] = "[";
-        for (int i = 0; i < record_count; i++) {
-            char record[256];
-            snprintf(record, sizeof(record), 
-                     "{\"id\":%d,\"name\":\"%s\",\"age\":%d}%s", 
-                     database[i].id, database[i].name, database[i].age,
-                     i < record_count - 1 ? "," : "");
-            strcat(json, record);
-        }
-        strcat(json, "]");
-        send_response(client_socket, json, "application/json");
     } else if (strcmp(method, "POST") == 0 && strcmp(path, "/api/add") == 0) {
         int id, age;
         char name[50];
@@ -147,10 +140,9 @@ void generate_html(char* html, size_t size) {
         "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
         "<title>Database Management System</title>"
         "<style>"
-        "body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; display: flex; }"
-        "#sidebar { width: 300px; background-color: #f4f4f4; padding: 20px; height: 100vh; overflow-y: auto; }"
-        "#main { flex-grow: 1; padding: 20px; }"
-        "h1, h2 { color: #2c3e50; }"
+        "body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f4f4f4; }"
+        "h1 { color: #2c3e50; text-align: center; margin-bottom: 30px; }"
+        "#app { background-color: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }"
         "table { width: 100%%; border-collapse: collapse; margin-bottom: 20px; }"
         "th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }"
         "th { background-color: #3498db; color: white; }"
@@ -161,18 +153,17 @@ void generate_html(char* html, size_t size) {
         "button { background-color: #3498db; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; }"
         "button:hover { background-color: #2980b9; }"
         ".actions { display: flex; justify-content: space-between; margin-top: 20px; }"
-        "#overlay { position: fixed; top: 0; left: 0; width: 100%%; height: 100%%; background-color: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; }"
-        "#popup { background-color: white; padding: 20px; border-radius: 5px; }"
-        ".record-item { background-color: white; padding: 10px; margin-bottom: 10px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }"
         "</style>"
         "</head>"
         "<body>"
-        "<div id='sidebar'>"
-        "<h2>Records</h2>"
-        "<div id='recordList'></div>"
-        "</div>"
-        "<div id='main'>"
+        "<div id='app'>"
         "<h1>Database Management System</h1>"
+        "<table id='recordTable'>"
+        "<thead>"
+        "<tr><th>ID</th><th>Name</th><th>Age</th><th>Actions</th></tr>"
+        "</thead>"
+        "<tbody></tbody>"
+        "</table>"
         "<h2>Add/Edit Record</h2>"
         "<form id='recordForm'>"
         "<div class='form-group'>"
@@ -191,43 +182,37 @@ void generate_html(char* html, size_t size) {
         "</form>"
         "<div class='actions'>"
         "<div>"
-        "<button onclick='showSavePopup()'>Save Database</button>"
-        "<button onclick='showLoadPopup()'>Load Database</button>"
-        "</div>"
-        "</div>"
-        "</div>"
-        "<div id='overlay'>"
-        "<div id='popup'>"
-        "<h2 id='popupTitle'></h2>"
         "<input type='text' id='filename' placeholder='Enter filename'>"
-        "<button onclick='confirmAction()'>Confirm</button>"
-        "<button onclick='closePopup()'>Cancel</button>"
+        "<button onclick='saveDatabase()'>Save Database</button>"
+        "<button onclick='loadDatabase()'>Load Database</button>"
+        "</div>"
         "</div>"
         "</div>"
         "<script>"
         "let records = [];"
-        "let currentAction = '';"
         "function fetchRecords() {"
         "  fetch('/api/records')"
         "    .then(response => response.json())"
         "    .then(data => {"
         "      records = data;"
-        "      updateSidebar();"
+        "      updateTable();"
         "    });"
         "}"
-        "function updateSidebar() {"
-        "  const recordList = document.getElementById('recordList');"
-        "  recordList.innerHTML = '';"
+        "function updateTable() {"
+        "  const tbody = document.querySelector('#recordTable tbody');"
+        "  tbody.innerHTML = '';"
         "  records.forEach(record => {"
-        "    const div = document.createElement('div');"
-        "    div.className = 'record-item';"
-        "    div.innerHTML = "
-        "      <strong>${record.name}</strong> (ID: ${record.id})<br>"
-        "      Age: ${record.age}<br>"
-        "      <button onclick='editRecord(${record.id})'>Edit</button>"
-        "      <button onclick='deleteRecord(${record.id})'>Delete</button>"
-        "    ;"
-        "    recordList.appendChild(div);"
+        "    const tr = document.createElement('tr');"
+        "    tr.innerHTML = `"
+        "      <td>${record.id}</td>"
+        "      <td>${record.name}</td>"
+        "      <td>${record.age}</td>"
+        "      <td>"
+        "        <button onclick='editRecord(${record.id})'>Edit</button>"
+        "        <button onclick='deleteRecord(${record.id})'>Delete</button>"
+        "      </td>"
+        "    `;"
+        "    tbody.appendChild(tr);"
         "  });"
         "}"
         "document.getElementById('recordForm').addEventListener('submit', function(e) {"
@@ -259,34 +244,23 @@ void generate_html(char* html, size_t size) {
         "    body: JSON.stringify({ id })"
         "  }).then(() => fetchRecords());"
         "}"
-        "function showSavePopup() {"
-        "  currentAction = 'save';"
-        "  document.getElementById('popupTitle').textContent = 'Save Database';"
-        "  document.getElementById('overlay').style.display = 'flex';"
-        "}"
-        "function showLoadPopup() {"
-        "  currentAction = 'load';"
-        "  document.getElementById('popupTitle').textContent = 'Load Database';"
-        "  document.getElementById('overlay').style.display = 'flex';"
-        "}"
-        "function closePopup() {"
-        "  document.getElementById('overlay').style.display = 'none';"
-        "  document.getElementById('filename').value = '';"
-        "}"
-        "function confirmAction() {"
+        "function saveDatabase() {"
         "  const filename = document.getElementById('filename').value;"
-        "  if (!filename) {"
-        "    alert('Please enter a filename');"
-        "    return;"
-        "  }"
-        "  fetch(/api/${currentAction}, {"
+        "  fetch('/api/save', {"
+        "    method: 'POST',"
+        "    headers: { 'Content-Type': 'application/json' },"
+        "    body: JSON.stringify({ filename })"
+        "  }).then(() => alert('Database saved successfully'));"
+        "}"
+        "function loadDatabase() {"
+        "  const filename = document.getElementById('filename').value;"
+        "  fetch('/api/load', {"
         "    method: 'POST',"
         "    headers: { 'Content-Type': 'application/json' },"
         "    body: JSON.stringify({ filename })"
         "  }).then(() => {"
-        "    closePopup();"
-        "    if (currentAction === 'load') fetchRecords();"
-        "    alert(Database ${currentAction}d successfully);"
+        "    fetchRecords();"
+        "    alert('Database loaded successfully');"
         "  });"
         "}"
         "fetchRecords();"
